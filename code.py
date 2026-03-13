@@ -20,7 +20,7 @@ ROUTES = {
         "lead_time": 15, "base_cost": 850, "risk_level": 0.05,
         "color": [50, 150, 255] 
     },
-    "Route C (Emergency Overland / Spot Market)": {
+    "Route C (Emergency Spot Market)": {
         "lead_time": 1, "base_cost": 1200, "risk_level": 0.02,
         "color": [50, 255, 50] 
     },
@@ -40,6 +40,8 @@ ROUTE_COORDS = [
 
 # --- Initialize State ---
 def init_state():
+    st.session_state.game_started = False
+    st.session_state.participant_id = ""
     st.session_state.day = 1
     st.session_state.inventory = STARTING_INVENTORY
     st.session_state.pipeline = [] 
@@ -47,116 +49,147 @@ def init_state():
     st.session_state.total_cost = 0
     st.session_state.total_stockout = 0
     st.session_state.game_over = False
-    
-    # New Global Market Variables
     st.session_state.global_price_multiplier = 1.0
     st.session_state.shock_days_left = 0
-    
     st.session_state.event_messages = ["Simulation started. Manage your supply."]
     st.session_state.bullwhip_active = False
 
 if 'day' not in st.session_state:
     init_state()
 
-# --- Game Logic ---
-def advance_day(order_qty, selected_route):
-    messages = []
+st.set_page_config(page_title="India LPG Simulator", layout="wide")
+
+# ==========================================
+# 1. THE WELCOME / LOGIN SCREEN
+# ==========================================
+if not st.session_state.game_started:
+    st.title("🛢️ India LPG Supply Chain Simulator")
+    st.markdown("### Welcome, Chief Logistics Officer.")
     
-    # 1. Manage Global Market Shocks
-    if st.session_state.shock_days_left > 0:
-        st.session_state.shock_days_left -= 1
-        if st.session_state.shock_days_left == 0:
-            st.session_state.global_price_multiplier = 1.0
-            messages.append("✅ Global oil markets have stabilized. Prices returning to normal.")
-    
-    # 8% chance per day for a global panic to start
-    elif random.random() < 0.08:
-        st.session_state.shock_days_left = random.randint(3, 7)
-        st.session_state.global_price_multiplier = 1.40 # 40% spike in route costs
-        messages.append("🌍 GLOBAL SHOCK: Geopolitical panic! Worldwide hoarding is driving up oil prices and local demand!")
-
-    # 2. Calculate Today's Demand
-    base_variation = random.randint(-10, 15)
-    today_demand = BASE_DEMAND + base_variation
-    
-    if st.session_state.shock_days_left > 0:
-        today_demand += 25 # Local hoarding due to global shock
-        if "🌍 GLOBAL SHOCK" not in messages[0] if messages else True:
-            messages.append("📈 High Demand: Global hoarding panic is inflating daily requests.")
-            
-    if st.session_state.bullwhip_active:
-        today_demand = int(today_demand * 1.6) 
-        messages.append("⚠️ BULLWHIP EFFECT: Public panic buying due to recent shortages!")
-        st.session_state.bullwhip_active = False 
-
-    # 3. Process Arrivals from Pipeline
-    arrived_today = 0
-    remaining_pipeline = []
-    for order in st.session_state.pipeline:
-        if order['arrival_day'] == st.session_state.day:
-            arrived_today += order['qty']
-            st.session_state.total_cost += order['cost'] * order['qty']
-        else:
-            remaining_pipeline.append(order)
-    st.session_state.pipeline = remaining_pipeline
-    st.session_state.inventory += arrived_today
-
-    # 4. Fulfill Demand & Calculate Shortages
-    stockout_today = 0
-    if st.session_state.inventory >= today_demand:
-        st.session_state.inventory -= today_demand
-    else:
-        stockout_today = today_demand - st.session_state.inventory
-        st.session_state.inventory = 0
-        st.session_state.total_stockout += stockout_today
-        st.session_state.bullwhip_active = True 
-
-    # 5. Calculate Costs
-    holding_cost_today = st.session_state.inventory * HOLDING_COST
-    penalty_cost_today = stockout_today * STOCKOUT_PENALTY
-    st.session_state.total_cost += holding_cost_today + penalty_cost_today
-
-    # 6. Process New Order
-    if order_qty > 0:
-        route_info = ROUTES[selected_route]
-        current_cost = int(route_info["base_cost"] * st.session_state.global_price_multiplier)
+    with st.container(border=True):
+        st.markdown("""
+        **Your Mission:** Manage India's daily LPG imports for 30 days. Balance your budget while navigating geopolitical risks, maritime chokepoints, and volatile global markets.
         
-        if random.random() < route_info["risk_level"]:
-            delay = random.randint(7, 14) if "Red Sea" in selected_route else random.randint(2, 6)
-            arrival = st.session_state.day + route_info["lead_time"] + delay
-            messages.append(f"🚨 DISRUPTION: {selected_route} blocked! Delayed by {delay} days.")
+        **Key Rules:**
+        * **Demand:** Averages 80 TMT per day.
+        * **Holding Costs:** Hoarding inventory costs $5 per unit daily.
+        * **Stockout Penalty:** Hitting 0 inventory costs $200 per unit missing.
+        * **The Bullwhip Effect:** If you run out of gas, public panic will trigger a 60% demand spike the very next day.
+        * **Global Shocks:** Keep an eye on global oil prices. Panic can drive up freight costs overnight.
+        """)
+        
+        st.warning("⚠️ Make sure you download your final CSV report at the end of Day 30!")
+
+    st.markdown("---")
+    st.subheader("Participant Registration")
+    
+    with st.form("login_form"):
+        p_id = st.text_input("Enter your Participant ID or Name (Required):")
+        start_btn = st.form_submit_button("Start Simulation")
+        
+        if start_btn:
+            if p_id.strip() == "":
+                st.error("You must enter a Participant ID to continue.")
+            else:
+                st.session_state.participant_id = p_id.strip()
+                st.session_state.game_started = True
+                st.rerun()
+
+# ==========================================
+# 2. THE MAIN GAME BOARD
+# ==========================================
+elif not st.session_state.game_over:
+    
+    # --- Game Logic Function ---
+    def advance_day(order_qty, selected_route):
+        messages = []
+        
+        if st.session_state.shock_days_left > 0:
+            st.session_state.shock_days_left -= 1
+            if st.session_state.shock_days_left == 0:
+                st.session_state.global_price_multiplier = 1.0
+                messages.append("✅ Global oil markets have stabilized.")
+        elif random.random() < 0.08:
+            st.session_state.shock_days_left = random.randint(3, 7)
+            st.session_state.global_price_multiplier = 1.40 
+            messages.append("🌍 GLOBAL SHOCK: Geopolitical panic is driving up oil prices and demand!")
+
+        base_variation = random.randint(-10, 15)
+        today_demand = BASE_DEMAND + base_variation
+        
+        if st.session_state.shock_days_left > 0:
+            today_demand += 25 
+            if "🌍 GLOBAL SHOCK" not in messages[0] if messages else True:
+                messages.append("📈 High Demand: Global hoarding is inflating requests.")
+                
+        if st.session_state.bullwhip_active:
+            today_demand = int(today_demand * 1.6) 
+            messages.append("⚠️ BULLWHIP EFFECT: Public panic buying due to recent shortages!")
+            st.session_state.bullwhip_active = False 
+
+        arrived_today = 0
+        remaining_pipeline = []
+        for order in st.session_state.pipeline:
+            if order['arrival_day'] == st.session_state.day:
+                arrived_today += order['qty']
+                st.session_state.total_cost += order['cost'] * order['qty']
+            else:
+                remaining_pipeline.append(order)
+        st.session_state.pipeline = remaining_pipeline
+        st.session_state.inventory += arrived_today
+
+        stockout_today = 0
+        if st.session_state.inventory >= today_demand:
+            st.session_state.inventory -= today_demand
         else:
-            arrival = st.session_state.day + route_info["lead_time"]
+            stockout_today = today_demand - st.session_state.inventory
+            st.session_state.inventory = 0
+            st.session_state.total_stockout += stockout_today
+            st.session_state.bullwhip_active = True 
+
+        holding_cost_today = st.session_state.inventory * HOLDING_COST
+        penalty_cost_today = stockout_today * STOCKOUT_PENALTY
+        st.session_state.total_cost += holding_cost_today + penalty_cost_today
+
+        if order_qty > 0:
+            route_info = ROUTES[selected_route]
+            current_cost = int(route_info["base_cost"] * st.session_state.global_price_multiplier)
             
-        st.session_state.pipeline.append({
-            'arrival_day': arrival,
-            'qty': order_qty,
-            'cost': current_cost, # Lock in the price at the time of order
-            'route': selected_route
+            if random.random() < route_info["risk_level"]:
+                delay = random.randint(7, 14) if "Red Sea" in selected_route else random.randint(2, 6)
+                arrival = st.session_state.day + route_info["lead_time"] + delay
+                messages.append(f"🚨 DISRUPTION: {selected_route[:7]} delayed by {delay} days!")
+            else:
+                arrival = st.session_state.day + route_info["lead_time"]
+                
+            st.session_state.pipeline.append({
+                'arrival_day': arrival,
+                'qty': order_qty,
+                'cost': current_cost,
+                'route': selected_route
+            })
+
+        if not messages:
+            messages.append("Standard market conditions.")
+        st.session_state.event_messages = messages
+
+        st.session_state.history.append({
+            "Participant_ID": st.session_state.participant_id, # Add ID to history!
+            "Day": st.session_state.day,
+            "Inventory": st.session_state.inventory,
+            "Demand": today_demand,
+            "Stockout": stockout_today,
+            "Price_Multiplier": st.session_state.global_price_multiplier
         })
 
-    if not messages:
-        messages.append("Standard market conditions.")
-    st.session_state.event_messages = messages
+        st.session_state.day += 1
+        if st.session_state.day > SIMULATION_DAYS:
+            st.session_state.game_over = True
 
-    # 7. Record History and Advance Time
-    st.session_state.history.append({
-        "Day": st.session_state.day,
-        "Inventory": st.session_state.inventory,
-        "Demand": today_demand,
-        "Stockout": stockout_today,
-        "Price_Multiplier": st.session_state.global_price_multiplier
-    })
+    # --- UI Layout ---
+    st.title("🛢️ India LPG Supply Chain Simulator")
+    st.caption(f"Playing as: **{st.session_state.participant_id}**")
 
-    st.session_state.day += 1
-    if st.session_state.day > SIMULATION_DAYS:
-        st.session_state.game_over = True
-
-# --- UI Layout ---
-st.set_page_config(page_title="India LPG Simulator", layout="wide")
-st.title("🛢️ India LPG Supply Chain Simulator")
-
-if not st.session_state.game_over:
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Day", f"{st.session_state.day} / {SIMULATION_DAYS}")
     col2.metric("Current Inventory", f"{st.session_state.inventory} TMT")
@@ -165,7 +198,6 @@ if not st.session_state.game_over:
     market_state = "🚨 High Volatility" if st.session_state.shock_days_left > 0 else "🟢 Stable"
     col4.metric("Global Oil Market", market_state, f"{int(st.session_state.global_price_multiplier * 100)}% Price Level", delta_color="inverse")
 
-    # Display dynamic alerts
     for msg in st.session_state.event_messages:
         if "🚨" in msg or "⚠️" in msg or "🌍" in msg:
             st.error(msg)
@@ -176,7 +208,7 @@ if not st.session_state.game_over:
         else:
             st.info(msg)
 
-    # --- Render PyDeck Map ---
+    # Render PyDeck Map
     arc_layer = pdk.Layer(
         "ArcLayer",
         data=ROUTE_COORDS,
@@ -188,7 +220,6 @@ if not st.session_state.game_over:
         pickable=True,
         auto_highlight=True,
     )
-    
     view_state = pdk.ViewState(latitude=20.0, longitude=35.0, zoom=1.5, pitch=45)
     st.pydeck_chart(pdk.Deck(layers=[arc_layer], initial_view_state=view_state, tooltip={"text": "{name} to India"}))
 
@@ -199,21 +230,11 @@ if not st.session_state.game_over:
         with st.form("order_form"):
             order_qty = st.number_input("Order Quantity (TMT)", min_value=0, max_value=500, value=80, step=10)
             
-            st.write("**Select Shipping Route:**")
-            
-            # Formatter function to show full route names and DYNAMIC costs
             def format_route(r):
                 current_price = int(ROUTES[r]['base_cost'] * st.session_state.global_price_multiplier)
-                lead = ROUTES[r]['lead_time']
-                risk = int(ROUTES[r]['risk_level'] * 100)
-                return f"{r} | Lead: {lead}d | Cost: ${current_price} | Risk: {risk}%"
+                return f"{r} | Lead: {ROUTES[r]['lead_time']}d | Cost: ${current_price} | Risk: {int(ROUTES[r]['risk_level']*100)}%"
 
-            selected_route = st.radio(
-                "Routes", 
-                list(ROUTES.keys()), 
-                format_func=format_route,
-                label_visibility="collapsed"
-            )
+            selected_route = st.radio("Routes", list(ROUTES.keys()), format_func=format_route, label_visibility="collapsed")
             submit = st.form_submit_button("Submit Order & Advance Day")
             if submit:
                 advance_day(order_qty, selected_route)
@@ -227,47 +248,44 @@ if not st.session_state.game_over:
         else:
             st.write("*No incoming shipments.*")
 
+# ==========================================
+# 3. GAME OVER & DATA EXPORT
+# ==========================================
 else:
     st.success("Simulation Complete!")
     base_budget = (BASE_DEMAND * SIMULATION_DAYS) * ROUTES["Route A (Middle East via Hormuz)"]["base_cost"]
     final_score = base_budget - st.session_state.total_cost
     
-    st.subheader("Performance Review")
+    st.subheader(f"Performance Review: {st.session_state.participant_id}")
     col_s1, col_s2, col_s3 = st.columns(3)
     col_s1.metric("Total Cost", f"${st.session_state.total_cost:,}")
     col_s2.metric("Total Unmet Demand", st.session_state.total_stockout)
     col_s3.metric("Final Score", f"{final_score:,}")
     
-    st.markdown("### 30-Day Operational History")
     df_history = pd.DataFrame(st.session_state.history).set_index("Day")
     st.line_chart(df_history[["Inventory", "Demand", "Stockout"]])
-
-    # ... (existing performance review code) ...
-
+    
     st.markdown("---")
     st.subheader("📥 Export Data for Researcher")
-    st.write("Please download your results and email the file to the researcher.")
+    st.write("Please download your results and send the file to your instructor.")
     
-    # 1. Convert the session history list into a Pandas DataFrame
-    df_history = pd.DataFrame(st.session_state.history)
+    # Package data
+    df_history_export = pd.DataFrame(st.session_state.history)
+    df_history_export['Final_Score'] = final_score
+    df_history_export['Total_Cost'] = st.session_state.total_cost
+    df_history_export['Total_Stockout'] = st.session_state.total_stockout
     
-    # Add final score and total costs as columns so they are saved in the data
-    df_history['Final_Score'] = final_score
-    df_history['Total_Cost'] = st.session_state.total_cost
-    df_history['Total_Stockout'] = st.session_state.total_stockout
+    # Naming the file dynamically based on their ID!
+    file_name_dynamic = f"sim_results_{st.session_state.participant_id}.csv"
+    csv_data = df_history_export.to_csv(index=False).encode('utf-8')
     
-    # 2. Convert DataFrame to CSV format natively
-    csv_data = df_history.to_csv(index=False).encode('utf-8')
-    
-    # 3. Create the Download Button
     st.download_button(
         label="Download Simulation Results (CSV)",
         data=csv_data,
-        file_name="lpg_simulation_results.csv",
+        file_name=file_name_dynamic,
         mime="text/csv"
     )
     
-    if st.button("Restart Simulation"):
+    if st.button("Restart Simulation", key="final_restart_btn"):
         init_state()
         st.rerun()
-    
