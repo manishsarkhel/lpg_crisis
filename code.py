@@ -10,7 +10,7 @@ HOLDING_COST = 5
 STOCKOUT_PENALTY = 200 
 SIMULATION_DAYS = 30
 
-# --- The 3 Supply Chain Routes ---
+# --- The 4 Supply Chain Routes ---
 ROUTES = {
     "Route A (Middle East via Hormuz)": {
         "lead_time": 3, "cost": 500, "risk_level": 0.30, 
@@ -26,6 +26,11 @@ ROUTES = {
         "lead_time": 1, "cost": 1200, "risk_level": 0.02,
         "desc": "Immediate delivery. Exorbitant cost.",
         "color": [50, 255, 50] # Green
+    },
+    "Route D (Red Sea via Suez Canal)": {
+        "lead_time": 8, "cost": 650, "risk_level": 0.45,
+        "desc": "Medium cost/time. Extreme Houthi strike risk.",
+        "color": [255, 165, 0] # Orange
     }
 }
 
@@ -34,7 +39,8 @@ INDIA_PORT = [72.8777, 19.0760] # Mumbai
 ROUTE_COORDS = [
     {"route": "Route A", "start": [54.3773, 24.4539], "end": INDIA_PORT, "color": [255, 50, 50], "name": "Middle East"},
     {"route": "Route B", "start": [-95.0, 29.0], "end": INDIA_PORT, "color": [50, 150, 255], "name": "USA Gulf Coast"},
-    {"route": "Route C", "start": [60.0, 40.0], "end": INDIA_PORT, "color": [50, 255, 50], "name": "Central Asia (Overland)"}
+    {"route": "Route C", "start": [60.0, 40.0], "end": INDIA_PORT, "color": [50, 255, 50], "name": "Central Asia (Overland)"},
+    {"route": "Route D", "start": [32.2846, 26.8206], "end": INDIA_PORT, "color": [255, 165, 0], "name": "Red Sea / Egypt"}
 ]
 
 # --- Initialize State ---
@@ -95,7 +101,8 @@ def advance_day(order_qty, selected_route):
     if order_qty > 0:
         route_info = ROUTES[selected_route]
         if random.random() < route_info["risk_level"]:
-            delay = random.randint(2, 6)
+            # Red Sea disruptions tend to be longer due to forced rerouting around Africa
+            delay = random.randint(7, 14) if "Red Sea" in selected_route else random.randint(2, 6)
             arrival = st.session_state.day + route_info["lead_time"] + delay
             st.session_state.event_message += f" | 🚨 DISRUPTION: {selected_route[:7]} delayed by {delay} days!"
         else:
