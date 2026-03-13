@@ -241,6 +241,35 @@ else:
     st.markdown("### 30-Day Operational History")
     df_history = pd.DataFrame(st.session_state.history).set_index("Day")
     st.line_chart(df_history[["Inventory", "Demand", "Stockout"]])
+
+    # ... (existing performance review code) ...
+
+    st.markdown("---")
+    st.subheader("📥 Export Data for Researcher")
+    st.write("Please download your results and email the file to the researcher.")
+    
+    # 1. Convert the session history list into a Pandas DataFrame
+    df_history = pd.DataFrame(st.session_state.history)
+    
+    # Add final score and total costs as columns so they are saved in the data
+    df_history['Final_Score'] = final_score
+    df_history['Total_Cost'] = st.session_state.total_cost
+    df_history['Total_Stockout'] = st.session_state.total_stockout
+    
+    # 2. Convert DataFrame to CSV format natively
+    csv_data = df_history.to_csv(index=False).encode('utf-8')
+    
+    # 3. Create the Download Button
+    st.download_button(
+        label="Download Simulation Results (CSV)",
+        data=csv_data,
+        file_name="lpg_simulation_results.csv",
+        mime="text/csv"
+    )
+    
+    if st.button("Restart Simulation"):
+        init_state()
+        st.rerun()
     
     if st.button("Restart Simulation"):
         init_state()
