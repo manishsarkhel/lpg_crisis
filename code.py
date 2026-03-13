@@ -271,6 +271,3 @@ else:
         init_state()
         st.rerun()
     
-    if st.button("Restart Simulation"):
-        init_state()
-        st.rerun()
