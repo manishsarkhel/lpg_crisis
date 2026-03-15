@@ -5,15 +5,15 @@ import pydeck as pdk
 
 # --- Simulation Constants ---
 BASE_DEMAND = 80 
-STARTING_INVENTORY = 160 
-HOLDING_COST = 5 
-STOCKOUT_PENALTY = 200 
+STARTING_INVENTORY = 240 
+HOLDING_COST = 15 
+STOCKOUT_PENALTY = 800 
 SIMULATION_DAYS = 30
 
 # --- The 4 Supply Chain Routes ---
 ROUTES = {
     "Route A (Middle East via Hormuz)": {
-        "lead_time": 3, "base_cost": 500, "risk_level": 0.30, 
+        "lead_time": 3, "base_cost": 500, "risk_level": 0.35, 
         "color": [255, 50, 50] 
     },
     "Route B (USA via Cape of Good Hope)": {
@@ -21,7 +21,8 @@ ROUTES = {
         "color": [50, 150, 255] 
     },
     "Route C (Emergency Spot Market)": {
-        "lead_time": 1, "base_cost": 1200, "risk_level": 0.02,
+        "lead_time": 1, "base_cost": 1500, 
+        "risk_level": 0.02,
         "color": [50, 255, 50] 
     },
     "Route D (Red Sea via Suez Canal)": {
